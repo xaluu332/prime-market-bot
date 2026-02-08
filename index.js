@@ -1,3 +1,12 @@
+// ================= ENV =================
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
+console.log("==== ENV CHECK ====");
+console.log("TOKEN:", process.env.TOKEN ? "SET" : "NOT SET");
+console.log("GUILD_ID:", process.env.GUILD_ID ? "SET" : "NOT SET");
+
+// ================= IMPORT =================
 const {
   Client,
   GatewayIntentBits,
@@ -12,8 +21,27 @@ const {
   Routes
 } = require("discord.js");
 
-const config = require("./config.json");
+// ================= CONFIG =================
+const config = {
+  token: process.env.TOKEN,
+  guildId: process.env.GUILD_ID,
+  verifyRoleId: process.env.VERIFY_ROLE_ID,
+  supportRoleId: process.env.SUPPORT_ROLE_ID,
+  legitChannelId: process.env.LEGIT_CHANNEL_ID,
+  welcomeChannelId: process.env.WELCOME_CHANNEL_ID,
+  ticketCategoryId: process.env.TICKET_CATEGORY_ID,
+  verifyImage: process.env.VERIFY_IMAGE,
+  welcomeImage: process.env.WELCOME_IMAGE,
+  ticketImage: process.env.TICKET_IMAGE
+};
 
+// ================= TOKEN CHECK =================
+if (!config.token) {
+  console.error("❌ TOKEN nie został ustawiony w environment variables!");
+  process.exit(1);
+}
+
+// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,15 +51,16 @@ const client = new Client({
   ]
 });
 
-/* ================= GLOBAL ================= */
+// ================= GLOBAL =================
 const spinCooldown = new Map();
 let activeGuessGiveaway = null;
 const giveaways = new Map();
 
-/* ================= READY ================= */
+// ================= READY =================
 client.once("ready", async () => {
   console.log(`✅ ${client.user.tag} ONLINE`);
 
+  // ================= SLASH COMMANDS =================
   const commands = [
     new SlashCommandBuilder()
       .setName("say")
@@ -72,26 +101,25 @@ client.once("ready", async () => {
     new SlashCommandBuilder()
       .setName("clear")
       .setDescription("Clear messages in the channel")
-      .addStringOption(o =>
-        o.setName("amount")
-          .setDescription("Number of messages to delete or 'all'")
-          .setRequired(true)
-      )
+      .addStringOption(o => o.setName("amount").setDescription("Number of messages to delete or 'all'").setRequired(true))
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(config.token);
-  await rest.put(Routes.applicationGuildCommands(client.user.id, config.guildId), { body: commands });
+  try {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, config.guildId), { body: commands });
+    console.log("✅ Slash commands registered");
+  } catch (error) {
+    console.error("❌ Error registering slash commands:", error);
+  }
 });
 
+// ================= MEMBER JOIN =================
 client.on("guildMemberAdd", async member => {
-  // Kanał powitalny
   const welcomeChannel = member.guild.channels.cache.get(config.welcomeChannelId);
   if (!welcomeChannel) return;
 
-  // Liczba członków łącznie (boty też)
   const totalMembers = member.guild.memberCount;
 
-  // ================= POWITALNY EMBED =================
   const embed = new EmbedBuilder()
     .setColor("#00ffcc")
     .setTitle("👋 Welcome")
@@ -100,42 +128,36 @@ client.on("guildMemberAdd", async member => {
 
   await welcomeChannel.send({ content: `${member}`, embeds: [embed] });
 
-  // ================= AKTUALIZACJA KANAŁU GŁOSOWEGO JAKO LICZNIK =================
-  const voiceChannelId = "1469476659005624544"; // Twój kanał głosowy
+  const voiceChannelId = "1469476659005624544";
   const voiceChannel = member.guild.channels.cache.get(voiceChannelId);
-
-  if (voiceChannel && voiceChannel.type === 2) { // 2 = GuildVoice
+  if (voiceChannel && voiceChannel.type === ChannelType.GuildVoice) {
     await voiceChannel.setName(`Members: ${totalMembers}`);
   }
 });
 
+// ================= MEMBER LEAVE =================
 client.on("guildMemberRemove", async member => {
   const totalMembers = member.guild.memberCount;
-
-  const voiceChannelId = "1469476659005624544"; // Twój kanał głosowy
+  const voiceChannelId = "1469476659005624544";
   const voiceChannel = member.guild.channels.cache.get(voiceChannelId);
-
-  if (voiceChannel && voiceChannel.type === 2) {
+  if (voiceChannel && voiceChannel.type === ChannelType.GuildVoice) {
     await voiceChannel.setName(`Members: ${totalMembers}`);
   }
 });
 
-/* ================= INTERACTIONS ================= */
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async interaction => {
   if (interaction.isButton()) {
-    // ===== Verify =====
     if (interaction.customId === "verify") {
       await interaction.member.roles.add(config.verifyRoleId);
       return interaction.reply({ content: "✅ You are verified!", ephemeral: true });
     }
 
-    // ===== Ticket =====
     if (interaction.customId.startsWith("ticket_")) {
       const type = interaction.customId.split("_")[1];
       return createTicket(interaction, type);
     }
 
-    // ===== Close ticket =====
     if (interaction.customId === "ticket_close") {
       await interaction.reply("🔒 Ticket will close in 5 seconds...");
       setTimeout(() => interaction.channel.delete(), 5000);
@@ -193,7 +215,7 @@ client.on("interactionCreate", async interaction => {
   // ===== SPIN =====
   if (cmd === "spin") {
     const now = Date.now();
-    const cd = 60 * 60 * 1000; // 1h
+    const cd = 60 * 60 * 1000;
     if (spinCooldown.has(interaction.user.id) && spinCooldown.get(interaction.user.id) > now)
       return interaction.reply({ content: "⏳ Try again later.", ephemeral: true });
 
@@ -261,7 +283,7 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-/* ================= MESSAGE LISTENER ================= */
+// ================= MESSAGE LISTENER =================
 client.on("messageCreate", message => {
   if (!activeGuessGiveaway || message.author.bot) return;
   if (message.channel.id !== activeGuessGiveaway.channelId) return;
@@ -273,7 +295,7 @@ client.on("messageCreate", message => {
   }
 });
 
-/* ================= TICKETS ================= */
+// ================= TICKETS =================
 async function createTicket(interaction, type) {
   const guild = interaction.guild;
   const user = interaction.user;
@@ -307,69 +329,5 @@ async function createTicket(interaction, type) {
   interaction.reply({ content: `✅ Ticket created: ${channel}`, ephemeral: true });
 }
 
-/* ================= SETUP PANEL ================= */
-client.on("messageCreate", async message => {
-  if (message.author.bot || message.content !== "!setup") return;
-
-  // ===== VERIFY PANEL =====
-  const verifyRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("verify")
-      .setLabel("✅ Verify")
-      .setStyle(ButtonStyle.Success)
-  );
-
-  const verifyEmbed = new EmbedBuilder()
-    .setColor("#00ffcc")
-    .setTitle("Verify Yourself")
-    .setDescription("Click the button below to get verified ✅")
-    .setImage(config.verifyImage); // <- poprawny obraz weryfikacji
-
-  await message.channel.send({ embeds: [verifyEmbed], components: [verifyRow] });
-
-  // ===== TICKET PANEL =====
-  const ticketRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ticket_support")
-      .setLabel("🎧 Support")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("ticket_purchase")
-      .setLabel("🛒 Purchase")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  const ticketEmbed = new EmbedBuilder()
-    .setColor("#00ffcc")
-    .setTitle("🎫 Tickets")
-    .setDescription("To open a ticket click the button below ⬇️")
-    .setImage(config.ticketImage); // <- poprawny obraz ticketów
-
-  await message.channel.send({ embeds: [ticketEmbed], components: [ticketRow] });
-});
-
-/* ================= OCHRONA SERWERA ================= */
-client.on("guildChannelDelete", async channel => {
-  const audit = await channel.guild.fetchAuditLogs({ type: 'CHANNEL_DELETE', limit: 1 });
-  const entry = audit.entries.first();
-  if (!entry) return;
-  const user = entry.executor;
-  if (!user.permissions.has("Administrator")) {
-    console.log(`🚨 ${user.tag} próbował usunąć kanał!`);
-    // opcjonalnie przywrócenie kanału, np. w zależności od potrzeb
-  }
-});
-
-client.on("guildBanAdd", async (guild, user) => {
-  console.log(`🚨 Ban detected: ${user.tag}`);
-});
-
-client.on("roleDelete", async role => {
-  console.log(`🚨 Role deleted: ${role.name}`);
-});
-
-client.on("roleUpdate", async role => {
-  console.log(`🚨 Role updated: ${role.name}`);
-});
-
+// ================= LOGIN =================
 client.login(config.token);
