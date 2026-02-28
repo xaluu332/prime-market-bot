@@ -2,6 +2,9 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
+const fs = require("fs");
+
+const PAYMENT_CHANNEL_ID = "1468682731268477013";
 console.log("==== ENV CHECK ====");
 console.log("TOKEN:", process.env.TOKEN ? "SET" : "NOT SET");
 console.log("GUILD_ID:", process.env.GUILD_ID ? "SET" : "NOT SET");
@@ -59,6 +62,24 @@ const giveaways = new Map();
 // ================= READY =================
 client.once("ready", async () => {
   console.log(`✅ ${client.user.tag} ONLINE`);
+// ===== AUTO PAYMENTS MESSAGE =====
+const paymentChannel = await client.channels.fetch(PAYMENT_CHANNEL_ID).catch(() => null);
+if (paymentChannel) {
+  const embed = new EmbedBuilder()
+    .setColor("#2b2d31")
+    .setTitle("💸 PAYMENTS-METHODS")
+    .setDescription(`
+> • 🪙  - **LTC**
+> • 💙  - **Paypal**
+> • 💳  - **Blik**
+> • 🟣  - **Skrill**
+> • ⚫  - **Revolut**
+
+If you are interested in purchasing any product from the market, please visit <#1468682731268477020>
+`);
+
+  paymentChannel.send({ embeds: [embed] });
+}
 
   // ================= SLASH COMMANDS =================
   const commands = [
@@ -88,7 +109,9 @@ client.once("ready", async () => {
       .setDescription("Leave a legit review")
       .addUserOption(o => o.setName("user").setDescription("Seller").setRequired(true))
       .addStringOption(o => o.setName("product").setDescription("Product").setRequired(true))
-      .addStringOption(o => o.setName("message").setDescription("Review message").setRequired(true)),
+      .addStringOption(o => o.setName("payment").setDescription("Payment method").setRequired(true))
+      .addStringOption(o => o.setName("message").setDescription("Review message").setRequired(true))
+      .addBooleanOption(o => o.setName("anonymous").setDescription("Anonymous review?").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("giveawayguess")
@@ -123,7 +146,7 @@ client.on("guildMemberAdd", async member => {
   const embed = new EmbedBuilder()
     .setColor("#00ffcc")
     .setTitle("👋 Welcome")
-    .setDescription(`Hi ${member}!\nWelcome to **PrimeMarket**.\nYou are member number **${totalMembers}**!\nCheck out our offer and stay with us for longer!`)
+    .setDescription(`Hi ${member}!\nWelcome to **Nexus Market**.\nYou are member number **${totalMembers}**!\nCheck out our offer and stay with us for longer!`)
     .setImage(config.welcomeImage);
 
   await welcomeChannel.send({ content: `${member}`, embeds: [embed] });
@@ -235,22 +258,49 @@ client.on("interactionCreate", async interaction => {
 
   // ===== LEGIT =====
   if (cmd === "legit") {
-    const channel = interaction.guild.channels.cache.get(config.legitChannelId);
-    if (!channel) return interaction.reply({ content: "❌ Legit channel not found.", ephemeral: true });
+  const channel = interaction.guild.channels.cache.get(config.legitChannelId);
+  if (!channel) return interaction.reply({ content: "❌ Legit channel not found.", ephemeral: true });
 
-    const embed = new EmbedBuilder()
-      .setColor("#00ff00")
-      .setTitle("⭐ Legit Review")
-      .addFields(
-        { name: "Seller", value: interaction.options.getUser("user").username },
-        { name: "Product", value: interaction.options.getString("product") },
-        { name: "Message", value: interaction.options.getString("message") }
-      )
-      .setFooter({ text: `By ${interaction.user.username}` });
-
-    channel.send({ embeds: [embed] });
-    interaction.reply({ content: "✅ Legit posted!", ephemeral: true });
+  // ===== REVIEW COUNTER =====
+  let data = { count: 0 };
+  if (fs.existsSync("./reviews.json")) {
+    data = JSON.parse(fs.readFileSync("./reviews.json"));
   }
+
+  data.count++;
+  fs.writeFileSync("./reviews.json", JSON.stringify(data, null, 2));
+
+  const seller = interaction.options.getUser("user");
+  const product = interaction.options.getString("product");
+  const payment = interaction.options.getString("payment");
+  const messageContent = interaction.options.getString("message");
+  const anonymous = interaction.options.getBoolean("anonymous");
+
+  const authorName = anonymous ? "Anonymous User" : interaction.user.username;
+  const avatar = anonymous
+    ? "https://i.imgur.com/3ZUrjUP.png"
+    : interaction.user.displayAvatarURL();
+
+  const embed = new EmbedBuilder()
+    .setColor("#2b2d31")
+    .setTitle(`NEW REVIEW : #${data.count}`)
+    .setThumbnail(avatar)
+    .setDescription(`
+**PRODUCT : ${product}**
+
+👤 **Seller:** ${seller.username}
+📝 **Review Author:** ${authorName}
+💳 **Payment Method:** ${payment}
+
+📄 **Content:**
+${messageContent}
+`)
+    .setFooter({ text: "Nexus Market" })
+    .setTimestamp();
+
+  channel.send({ embeds: [embed] });
+  interaction.reply({ content: "✅ Legit posted!", ephemeral: true });
+}
 
   // ===== GIVEAWAY GUESS =====
   if (cmd === "giveawayguess") {
@@ -331,3 +381,4 @@ async function createTicket(interaction, type) {
 
 // ================= LOGIN =================
 client.login(config.token);
+
